@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ComputerGraphics1_opentk_tomography", "ComputerGraphics1_opentk_tomography.csproj", "{3DCC39C0-9096-4E5F-B390-E7051D53890E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3DCC39C0-9096-4E5F-B390-E7051D53890E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3DCC39C0-9096-4E5F-B390-E7051D53890E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3DCC39C0-9096-4E5F-B390-E7051D53890E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3DCC39C0-9096-4E5F-B390-E7051D53890E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
