@@ -16,19 +16,29 @@ public class View : GameWindow
     private int _layerIndex;
     private readonly BinTomography _bin;
     private readonly TransferFunction _transferFunction;
-    public View(BinTomography bin, string name, int width = 800, int height = 600, TransferFunction? transferFunction = null
-        ) : base(GameWindowSettings.Default, 
+    private Timer _fpsTimer;
+
+    private class FpsLock
+    {
+        public int FpsCount { get; set; }
+    }
+
+    private FpsLock _fpsLock;
+    public View(BinTomography bin, string name, int width = 800, int height = 600,
+        TransferFunction? transferFunction = null
+    ) : base(GameWindowSettings.Default,
         new NativeWindowSettings()
         {
             Size = (width, height),
             Title = $"Tomography View: ${name}",
             // В лабе используется древний immediate режим отрисовки. 
             // Сейчас так никто не делает. Без этой строки не работает
-            Profile = ContextProfile.Compatability 
+            Profile = ContextProfile.Compatability
         }
     )
     {
         _bin = bin;
+        _fpsLock = new FpsLock();
         if (transferFunction == null)
         {
             transferFunction = (value) =>
@@ -60,6 +70,15 @@ public class View : GameWindow
         GL.Ortho(0, _bin.XSize, 0, _bin.YSize, -1, 1);
         GL.Viewport(0, 0, this.Size.X, this.Size.Y);
         DrawQuads(3);
+        
+        _fpsTimer = new Timer(state =>
+        {
+            lock (_fpsLock)
+            {
+                Console.WriteLine(_fpsLock.FpsCount);
+                _fpsLock.FpsCount = 0;
+            }
+        }, null, 1000, 1000);
     }
 
     protected override void OnResize(ResizeEventArgs e)
@@ -132,6 +151,11 @@ public class View : GameWindow
         else if (keyboard.IsKeyReleased(Keys.Down))
         {
             _keyCooldown = 0;
+        }
+
+        lock (_fpsLock)
+        {
+            _fpsLock.FpsCount++;
         }
     }
 }
