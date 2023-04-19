@@ -138,7 +138,9 @@ public class View : GameWindow
             default:
                 throw new ArgumentOutOfRangeException();
         }
-        TextUtility.Draw(-30, Size.Y + 20, cachedFps.ToString(), 32, ScaleFactorX, ScaleFactorY);
+        TextUtility.Draw(-30, Size.Y + 20, $"FPS: {cachedFps}", 32, ScaleFactorX, ScaleFactorY);
+        TextUtility.Draw(-30, Size.Y -20, $"MIN: {transferMin}", 32, ScaleFactorX, ScaleFactorY);
+        TextUtility.Draw(-30, Size.Y -60, $"MAX: {transferMax}", 32, ScaleFactorX, ScaleFactorY);
         DrawModeIcon();
         lock (_fpsLock)
         {
@@ -289,7 +291,7 @@ public class View : GameWindow
     }
 
     private uint _keyCooldown = 0;
-    private uint _maxKeyCooldown = 1;
+    private uint _maxKeyCooldown = 0;
     
     private uint _TFKeyCooldown = 0;
     private uint _maxTFKeyCooldown = 0;
@@ -326,17 +328,17 @@ public class View : GameWindow
 
         if (keyboard.IsKeyReleased(Keys.D1))
         {
-            _maxKeyCooldown = 1;
+            _maxKeyCooldown = 0;
             _mode = DrawMode.Quads;
         }
         else if (keyboard.IsKeyReleased(Keys.D2))
         {
-            _maxKeyCooldown = 1000;
+            _maxKeyCooldown = 0;
             _mode = DrawMode.Texture;
         }
         else if (keyboard.IsKeyReleased(Keys.D3))
         {
-            _maxKeyCooldown = 2;
+            _maxKeyCooldown = 0;
             _mode = DrawMode.QuadStrip;
         }
         lock (_fpsLock)
@@ -349,7 +351,7 @@ public class View : GameWindow
             if (_TFKeyCooldown == 0)
             {
                 _TFKeyCooldown = _maxTFKeyCooldown;
-                transferMin = Math.Clamp(transferMin+1, 0, transferMax);
+                transferMin = Math.Clamp(transferMin+10, 0, transferMax-10);
                 needsReload = true;
             }
             else _TFKeyCooldown--;
@@ -363,7 +365,7 @@ public class View : GameWindow
             if (_TFKeyCooldown == 0)
             {
                 _TFKeyCooldown = _maxTFKeyCooldown;
-                transferMin = Math.Clamp(transferMin-1, 0, transferMax);
+                transferMin = Math.Clamp(transferMin-10, 0, transferMax-10);
                 needsReload = true;
             }
             else _TFKeyCooldown--;
@@ -378,7 +380,7 @@ public class View : GameWindow
             if (_TFKeyCooldown == 0)
             {
                 _TFKeyCooldown = _maxTFKeyCooldown;
-                transferMax = Math.Clamp(transferMax+1, transferMin, 10000);
+                transferMax = Math.Clamp(transferMax+10, transferMin+10, 10000);
                 needsReload = true;
             }
             else _TFKeyCooldown--;
@@ -392,7 +394,7 @@ public class View : GameWindow
             if (_TFKeyCooldown == 0)
             {
                 _TFKeyCooldown = _maxTFKeyCooldown;
-                transferMax = Math.Clamp(transferMax-1, transferMin, 10000);
+                transferMax = Math.Clamp(transferMax-10, transferMin+10, 10000);
                 needsReload = true;
             }
             else _TFKeyCooldown--;
