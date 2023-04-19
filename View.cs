@@ -14,6 +14,12 @@ namespace ComputerGraphics1_opentk_tomography;
 // https://stackoverflow.com/questions/6733934/what-does-immediate-mode-mean-in-opengl
 public class View : GameWindow
 {
+    private Shader _tomographyShader;
+    private List<int> _buffers;
+    private List<int> _vaos;
+    
+    
+    
     private Image<Rgba32> image;
     private int _VBOTexture;
 
@@ -21,8 +27,8 @@ public class View : GameWindow
     private byte[] _iconsTexBytes;
     private Image<Rgba32> icons;
 
-    private int transferMin = 0;
-    private int transferMax = 2000;
+    private int _transferMin;
+    private int _transferMax;
     
     public delegate Color TransferFunction(short value);
 
@@ -57,11 +63,14 @@ public class View : GameWindow
     {
         _bin = bin;
         _fpsLock = new FpsLock();
+        _buffers = new List<int>();
+        _vaos = new List<int>();
+        
         if (transferFunction == null)
         {
             transferFunction = (value) =>
             {
-                int newVal = Math.Clamp((value - transferMin) * 255 / (transferMax - transferMin), 0, 255);
+                int newVal = Math.Clamp((value - TransferMin) * 255 / (TransferMax - TransferMin), 0, 255);
                 return System.Drawing.Color.FromArgb(newVal, newVal, newVal);
             };
         }
@@ -83,6 +92,34 @@ public class View : GameWindow
         {
             needsReload = true;
             _layerIndex = value;
+        }
+    }
+
+    private int TransferMin
+    {
+        get => _transferMin;
+        set
+        {
+            if(_tomographyShader != null)
+            {
+                var uniformLocation = GL.GetUniformLocation(_tomographyShader.Handle, "tMin");
+                GL.Uniform1(uniformLocation, (float)value);
+            }
+            _transferMin = value;
+        }
+    }
+
+    private int TransferMax
+    {
+        get => _transferMax;
+        set
+        {
+            if (_tomographyShader != null)
+            {
+                var uniformLocation = GL.GetUniformLocation(_tomographyShader.Handle, "tMax");
+                GL.Uniform1(uniformLocation, (float)value);
+            }
+            _transferMax = value;
         }
     }
 
@@ -139,8 +176,8 @@ public class View : GameWindow
                 throw new ArgumentOutOfRangeException();
         }
         TextUtility.Draw(-30, Size.Y + 20, $"FPS: {cachedFps}", 32, ScaleFactorX, ScaleFactorY);
-        TextUtility.Draw(-30, Size.Y -20, $"MIN: {transferMin}", 32, ScaleFactorX, ScaleFactorY);
-        TextUtility.Draw(-30, Size.Y -60, $"MAX: {transferMax}", 32, ScaleFactorX, ScaleFactorY);
+        TextUtility.Draw(-30, Size.Y -20, $"MIN: {TransferMin}", 32, ScaleFactorX, ScaleFactorY);
+        TextUtility.Draw(-30, Size.Y -60, $"MAX: {TransferMax}", 32, ScaleFactorX, ScaleFactorY);
         DrawModeIcon();
         lock (_fpsLock)
         {
@@ -180,6 +217,10 @@ public class View : GameWindow
     protected override void OnLoad()
     {
         base.OnLoad();
+        _tomographyShader = new Shader("shader.vert", "shader.frag");
+        _tomographyShader.Use();
+        TransferMin = 0;
+        TransferMax = 2000;
         _iconsTexture = GL.GenTexture();
         _VBOTexture = GL.GenTexture();
         GL.BindTexture(TextureTarget.Texture2D, _iconsTexture);
@@ -189,11 +230,46 @@ public class View : GameWindow
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int) TextureMinFilter.Linear);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int) TextureMagFilter.Linear);
         
-        GL.ShadeModel(ShadingModel.Smooth);
+        //GL.ShadeModel(ShadingModel.Smooth);
         //GL.ClearColor(0f, 0f, 0f, 0f);
-        GL.MatrixMode(MatrixMode.Projection);
-        GL.LoadIdentity();
-        GL.Ortho(-50, _bin.XSize + 50, -50, _bin.YSize + 50, -1, 1);
+        //GL.MatrixMode(MatrixMode.Projection);
+        //GL.LoadIdentity();
+        //GL.Ortho(-50, _bin.XSize + 50, -50, _bin.YSize + 50, -1, 1);
+
+
+        List<float> layerBuf = new List<float>();
+        for (int layer = 0; layer < _bin.ZSize; layer++)
+        {
+            _vaos.Add(GL.GenVertexArray());
+            _buffers.Add(GL.GenBuffer());
+            GL.BindVertexArray(_vaos[layer]);
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _buffers[layer]);
+            
+            layerBuf.Clear();
+            
+            for (int x = 0; x < _bin.XSize - 1; x++)
+            {
+                for (int y = 0; y < _bin.YSize-1; y++)
+                {
+                    short value;
+
+                    AddVertexToList(layerBuf, x, y, layer);
+                    AddVertexToList(layerBuf, x, y+1, layer);
+                    AddVertexToList(layerBuf, x+1, y+1, layer);
+                    AddVertexToList(layerBuf, x, y, layer);
+                    AddVertexToList(layerBuf, x+1, y+1, layer);
+                    AddVertexToList(layerBuf, x+1, y, layer);
+                    
+                }
+            }
+
+            GL.BufferData(BufferTarget.ArrayBuffer, layerBuf.Count * sizeof(float), layerBuf.ToArray(), BufferUsageHint.DynamicDraw);
+            GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 3 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(1, 1, VertexAttribPointerType.Float, false, 3 * sizeof(float), 2*sizeof(float));
+            GL.EnableVertexAttribArray(1);
+        }
+        
         GL.Viewport(0, 0, this.Size.X, this.Size.Y);
         //DrawQuads(3);
         
@@ -204,6 +280,16 @@ public class View : GameWindow
                 _fpsLock.Redraw = true;
             }
         }, null, 1000, 1000);
+    }
+
+    private void AddVertexToList(List<float> layerBuf, int x, int y, int layer)
+    {
+        short value;
+        value = _bin[x, y, layer];
+        layerBuf.Add(x * 2f / _bin.XSize - 1f);
+        layerBuf.Add(y * 2f / _bin.YSize - 1f);
+        //layerBuf.Add(_transferFunction(value).R / 255f);
+        layerBuf.Add(value);
     }
 
     protected override void OnResize(ResizeEventArgs e)
@@ -239,7 +325,10 @@ public class View : GameWindow
     {
         
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-        GL.Begin(PrimitiveType.Quads);
+        _tomographyShader.Use();
+        GL.BindVertexArray(_vaos[_layerIndex]);
+        GL.DrawArrays(PrimitiveType.Triangles, 0, (_bin.XSize - 1) * (_bin.YSize - 1) * 6);
+        /*GL.Begin(PrimitiveType.Quads);
         for (int x = 0; x < _bin.XSize - 1; x++)
         {
             for (int y = 0; y < _bin.YSize-1; y++)
@@ -263,9 +352,17 @@ public class View : GameWindow
             }
         }
 
-        GL.End();
+        GL.End();*/
+        
+        
     }
-    
+
+    protected override void OnUnload()
+    {
+        base.OnUnload();
+        _tomographyShader.Dispose();
+    }
+
     private void DrawQuadStrips(int layer)
     {
         
@@ -291,7 +388,7 @@ public class View : GameWindow
     }
 
     private uint _keyCooldown = 0;
-    private uint _maxKeyCooldown = 0;
+    private uint _maxKeyCooldown = 600;
     
     private uint _TFKeyCooldown = 0;
     private uint _maxTFKeyCooldown = 0;
@@ -328,7 +425,7 @@ public class View : GameWindow
 
         if (keyboard.IsKeyReleased(Keys.D1))
         {
-            _maxKeyCooldown = 0;
+            _maxKeyCooldown = 600;
             _mode = DrawMode.Quads;
         }
         else if (keyboard.IsKeyReleased(Keys.D2))
@@ -351,7 +448,7 @@ public class View : GameWindow
             if (_TFKeyCooldown == 0)
             {
                 _TFKeyCooldown = _maxTFKeyCooldown;
-                transferMin = Math.Clamp(transferMin+10, 0, transferMax-10);
+                TransferMin = Math.Clamp(TransferMin+10, 0, TransferMax-10);
                 needsReload = true;
             }
             else _TFKeyCooldown--;
@@ -365,7 +462,7 @@ public class View : GameWindow
             if (_TFKeyCooldown == 0)
             {
                 _TFKeyCooldown = _maxTFKeyCooldown;
-                transferMin = Math.Clamp(transferMin-10, 0, transferMax-10);
+                TransferMin = Math.Clamp(TransferMin-10, 0, TransferMax-10);
                 needsReload = true;
             }
             else _TFKeyCooldown--;
@@ -380,7 +477,7 @@ public class View : GameWindow
             if (_TFKeyCooldown == 0)
             {
                 _TFKeyCooldown = _maxTFKeyCooldown;
-                transferMax = Math.Clamp(transferMax+10, transferMin+10, 10000);
+                TransferMax = Math.Clamp(TransferMax+10, TransferMin+10, 10000);
                 needsReload = true;
             }
             else _TFKeyCooldown--;
@@ -394,7 +491,7 @@ public class View : GameWindow
             if (_TFKeyCooldown == 0)
             {
                 _TFKeyCooldown = _maxTFKeyCooldown;
-                transferMax = Math.Clamp(transferMax-10, transferMin+10, 10000);
+                TransferMax = Math.Clamp(TransferMax-10, TransferMin+10, 10000);
                 needsReload = true;
             }
             else _TFKeyCooldown--;
