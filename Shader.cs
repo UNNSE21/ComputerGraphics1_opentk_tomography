@@ -63,6 +63,12 @@ public class Shader
         GL.UseProgram(_handle);
     }
     
+    public int GetAttribLocation(string attribName)
+    {
+        return GL.GetAttribLocation(Handle, attribName);
+    }
+
+    
     
     private bool disposedValue = false;
 

@@ -14,11 +14,13 @@ namespace ComputerGraphics1_opentk_tomography;
 // https://stackoverflow.com/questions/6733934/what-does-immediate-mode-mean-in-opengl
 public class View : GameWindow
 {
-    private Shader _tomographyShader;
+
     private List<int> _buffers;
     private List<int> _vaos;
-    
-    
+
+    private int[] _modeIconVaos;
+    private Matrix4 _iconTransform;
+    private int _texModeVao;
     
     private Image<Rgba32> image;
     private int _VBOTexture;
@@ -31,9 +33,7 @@ public class View : GameWindow
     private int _transferMax;
     
     public delegate Color TransferFunction(short value);
-
-    private float ScaleFactorX { get; set; }
-    private float ScaleFactorY { get; set; }
+    
     private int _layerIndex;
     private readonly BinTomography _bin;
     private readonly TransferFunction _transferFunction;
@@ -65,7 +65,6 @@ public class View : GameWindow
         _fpsLock = new FpsLock();
         _buffers = new List<int>();
         _vaos = new List<int>();
-        
         if (transferFunction == null)
         {
             transferFunction = (value) =>
@@ -80,8 +79,6 @@ public class View : GameWindow
         _iconsTexBytes = new byte[4 * icons.Width * icons.Height];
         icons.CopyPixelDataTo(_iconsTexBytes);
         _mode = DrawMode.Quads;
-        ScaleFactorX = (float)_bin.XSize / Size.X;
-        ScaleFactorY = (float)_bin.YSize / Size.Y;
     }
 
     private int cachedFps = 0;
@@ -100,11 +97,9 @@ public class View : GameWindow
         get => _transferMin;
         set
         {
-            if(_tomographyShader != null)
-            {
-                var uniformLocation = GL.GetUniformLocation(_tomographyShader.Handle, "tMin");
-                GL.Uniform1(uniformLocation, (float)value);
-            }
+            ShaderManager.TomographyQuadShader.Use();
+            var uniformLocation = GL.GetUniformLocation(ShaderManager.TomographyQuadShader.Handle, "tMin");
+            GL.Uniform1(uniformLocation, (float)value);
             _transferMin = value;
         }
     }
@@ -114,11 +109,9 @@ public class View : GameWindow
         get => _transferMax;
         set
         {
-            if (_tomographyShader != null)
-            {
-                var uniformLocation = GL.GetUniformLocation(_tomographyShader.Handle, "tMax");
-                GL.Uniform1(uniformLocation, (float)value);
-            }
+            ShaderManager.TomographyQuadShader.Use();
+            var uniformLocation = GL.GetUniformLocation(ShaderManager.TomographyQuadShader.Handle, "tMax");
+            GL.Uniform1(uniformLocation, (float)value);
             _transferMax = value;
         }
     }
@@ -137,19 +130,34 @@ public class View : GameWindow
     }
     void Load2DTexture()
     {
+        GL.GetError();
         var data = new byte[4 * image.Width * image.Height];
         image.CopyPixelDataTo(data);
-        GL.BindTexture(TextureTarget.Texture2D, _VBOTexture);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, 
-            image.Width, image.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, data);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int) TextureMinFilter.Linear);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int) TextureMagFilter.Linear);
-
+        GL.BindTexture(TextureTarget.Texture2D, _VBOTexture); 
         ErrorCode e = GL.GetError();
         if (e != ErrorCode.NoError)
         {
+            Console.Error.WriteLine("Error with texture binding:");
             Console.Error.WriteLine(e.ToString());
         }
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, 
+            image.Width, image.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, data);
+        e = GL.GetError();
+        if (e != ErrorCode.NoError)
+        {
+            Console.Error.WriteLine("Error with texture loading:");
+            Console.Error.WriteLine(e.ToString());
+        }
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int) TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int) TextureMagFilter.Linear);
+
+        e = GL.GetError();
+        if (e != ErrorCode.NoError)
+        {
+            Console.Error.WriteLine("Error with texture filters:");
+            Console.Error.WriteLine(e.ToString());
+        }
+
         
     }
     protected override void OnRenderFrame(FrameEventArgs args)
@@ -169,15 +177,13 @@ public class View : GameWindow
                 }
                 DrawTexture();
                 break;
-            case DrawMode.QuadStrip:
-                DrawQuadStrips(_layerIndex);
-                break;
             default:
                 throw new ArgumentOutOfRangeException();
         }
-        TextUtility.Draw(-30, Size.Y + 20, $"FPS: {cachedFps}", 32, ScaleFactorX, ScaleFactorY);
-        TextUtility.Draw(-30, Size.Y -20, $"MIN: {TransferMin}", 32, ScaleFactorX, ScaleFactorY);
-        TextUtility.Draw(-30, Size.Y -60, $"MAX: {TransferMax}", 32, ScaleFactorX, ScaleFactorY);
+        TextUtility.Draw(20, Size.Y - 40, $"FPS: {cachedFps}", 32);
+        TextUtility.Draw(20, Size.Y -80, $"MIN: {TransferMin}", 32);
+        TextUtility.Draw(20, Size.Y -120, $"MAX: {TransferMax}", 32);
+        TextUtility.Draw(20, 8, $"LAYER: {LayerIndex}", 32);
         DrawModeIcon();
         lock (_fpsLock)
         {
@@ -195,21 +201,15 @@ public class View : GameWindow
     private void DrawModeIcon()
     {
         GL.Enable(EnableCap.Texture2D);
+        GL.ActiveTexture(TextureUnit.Texture0);
         GL.BindTexture(TextureTarget.Texture2D, _iconsTexture);
+        ShaderManager.UIShader.Use();
 
-        GL.Begin(PrimitiveType.Quads);
-        GL.Color3(Color.White);
-        
-        GL.TexCoord2(0f + 0.25f * ((int) _mode), 0f);
-        GL.Vertex2(-50, -50);
-        GL.TexCoord2(0.25f + 0.25f * ((int) _mode), 0f);
-        GL.Vertex2(80 * ScaleFactorX - 50, -50);
-        GL.TexCoord2(0.25f + 0.25f * ((int) _mode), 1f);
-        GL.Vertex2(80 * ScaleFactorX - 50, 80 * ScaleFactorY - 50);
-        GL.TexCoord2(0f + 0.25f * ((int) _mode), 1f);
-        GL.Vertex2(-50, 80 * ScaleFactorY - 50);
-        
-        GL.End();
+        var uniformLocation = GL.GetUniformLocation(ShaderManager.UIShader.Handle, "transform");
+        GL.UniformMatrix4(uniformLocation, false, ref _iconTransform);
+
+        GL.BindVertexArray(_modeIconVaos[(int)_mode]);
+        GL.DrawArrays(PrimitiveType.Triangles, 0, 6);
 
         GL.Disable(EnableCap.Texture2D);
     }
@@ -217,8 +217,35 @@ public class View : GameWindow
     protected override void OnLoad()
     {
         base.OnLoad();
-        _tomographyShader = new Shader("shader.vert", "shader.frag");
-        _tomographyShader.Use();
+        _iconTransform = Matrix4.CreateScale(120f / Size.Y) *
+                         Matrix4.CreateTranslation((Size.X - 60f) * 2f / Size.X - 1f, -1f, 0.1f);
+        _modeIconVaos = new int[2]
+        {
+            GL.GenVertexArray(),
+            GL.GenVertexArray()
+        };
+        for (int i = 0; i < _modeIconVaos.Length; i++)
+        {
+            float xTexSize = 0.25f;
+            GL.BindVertexArray(_modeIconVaos[i]);
+            GL.BindBuffer(BufferTarget.ArrayBuffer, GL.GenBuffer());
+            GL.BufferData(BufferTarget.ArrayBuffer, 24 * sizeof(float), new float[]
+            {
+                0f, 0f, xTexSize * i, 0f,
+                0f, 1f, xTexSize * i, 1f,
+                1f, 1f, xTexSize * (i+1), 1f,
+                0f, 0f, xTexSize * i, 0f,
+                1f, 1f, xTexSize * (i+1), 1f,
+                1f, 0f, xTexSize * (i+1), 0f
+            }, BufferUsageHint.StaticDraw);
+            GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 2*sizeof(float));
+            GL.EnableVertexAttribArray(1);
+        }
+        
+        
+        TextUtility.WindowSize = Size;
         TransferMin = 0;
         TransferMax = 2000;
         _iconsTexture = GL.GenTexture();
@@ -229,12 +256,6 @@ public class View : GameWindow
         
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int) TextureMinFilter.Linear);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int) TextureMagFilter.Linear);
-        
-        //GL.ShadeModel(ShadingModel.Smooth);
-        //GL.ClearColor(0f, 0f, 0f, 0f);
-        //GL.MatrixMode(MatrixMode.Projection);
-        //GL.LoadIdentity();
-        //GL.Ortho(-50, _bin.XSize + 50, -50, _bin.YSize + 50, -1, 1);
 
 
         List<float> layerBuf = new List<float>();
@@ -272,6 +293,24 @@ public class View : GameWindow
         
         GL.Viewport(0, 0, this.Size.X, this.Size.Y);
         //DrawQuads(3);
+        float[] textureModeVertices = new[]
+        {
+            -1.0f, -1.0f, 0.0f, 0.0f,
+            -1.0f,  1.0f, 0.0f, 1.0f,
+             1.0f,  1.0f, 1.0f, 1.0f,
+            -1.0f, -1.0f, 0.0f, 0.0f,
+             1.0f,  1.0f, 1.0f, 1.0f,
+             1.0f, -1.0f, 1.0f, 0.0f
+        };
+        _texModeVao = GL.GenVertexArray();
+        int texModeBuffer = GL.GenBuffer();
+        GL.BindVertexArray(_texModeVao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, texModeBuffer);
+        GL.BufferData(BufferTarget.ArrayBuffer, textureModeVertices.Length * sizeof(float), textureModeVertices, BufferUsageHint.StaticDraw);
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 0);
+        GL.EnableVertexAttribArray(0);
+        GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 2*sizeof(float));
+        GL.EnableVertexAttribArray(1);
         
         _fpsTimer = new Timer(state =>
         {
@@ -280,6 +319,7 @@ public class View : GameWindow
                 _fpsLock.Redraw = true;
             }
         }, null, 1000, 1000);
+        
     }
 
     private void AddVertexToList(List<float> layerBuf, int x, int y, int layer)
@@ -288,7 +328,6 @@ public class View : GameWindow
         value = _bin[x, y, layer];
         layerBuf.Add(x * 2f / _bin.XSize - 1f);
         layerBuf.Add(y * 2f / _bin.YSize - 1f);
-        //layerBuf.Add(_transferFunction(value).R / 255f);
         layerBuf.Add(value);
     }
 
@@ -296,28 +335,19 @@ public class View : GameWindow
     {
         base.OnResize(e);
         GL.Viewport(0, 0, this.Size.X, this.Size.Y);
-        ScaleFactorX = (float)_bin.XSize / Size.X;
-        ScaleFactorY = (float)_bin.YSize / Size.Y;
+        TextUtility.WindowSize = Size;
+        _iconTransform = Matrix4.CreateScale(120f / Size.X, 120f / Size.Y, 1f) *
+                         Matrix4.CreateTranslation((Size.X - 60) * 2f / Size.X - 1f, -1f, 0.1f);
     }
 
     private void DrawTexture()
     {
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        ShaderManager.TomographyTextureShader.Use();
         GL.Enable(EnableCap.Texture2D);
         GL.BindTexture(TextureTarget.Texture2D, _VBOTexture);
-        
-        GL.Begin(PrimitiveType.Quads);
-        GL.Color3(Color.White);
-        GL.TexCoord2(0f, 0f);
-        GL.Vertex2(0, 0);
-        GL.TexCoord2(0f, 1f);
-        GL.Vertex2(0, _bin.YSize);
-        GL.TexCoord2(1f, 1f);
-        GL.Vertex2(_bin.XSize, _bin.YSize);
-        GL.TexCoord2(1f, 0f);
-        GL.Vertex2(_bin.XSize, 0);
-        GL.End();
-        
+        GL.BindVertexArray(_texModeVao);
+        GL.DrawArrays(PrimitiveType.Triangles, 0, 6);
         GL.Disable(EnableCap.Texture2D);
     }
     
@@ -325,73 +355,24 @@ public class View : GameWindow
     {
         
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-        _tomographyShader.Use();
+        ShaderManager.TomographyQuadShader.Use();
         GL.BindVertexArray(_vaos[_layerIndex]);
         GL.DrawArrays(PrimitiveType.Triangles, 0, (_bin.XSize - 1) * (_bin.YSize - 1) * 6);
-        /*GL.Begin(PrimitiveType.Quads);
-        for (int x = 0; x < _bin.XSize - 1; x++)
-        {
-            for (int y = 0; y < _bin.YSize-1; y++)
-            {
-                short value;
-                value = _bin[x, y, layer];
-                GL.Color3(_transferFunction(value));
-                GL.Vertex2(x, y);
-                
-                value = _bin[x, y+1, layer];
-                GL.Color3(_transferFunction(value));
-                GL.Vertex2(x, y+1);
-                
-                value = _bin[x + 1, y + 1, layer];
-                GL.Color3(_transferFunction(value));
-                GL.Vertex2(x + 1, y + 1);
-                
-                value = _bin[x + 1, y, layer];
-                GL.Color3(_transferFunction(value));
-                GL.Vertex2(x + 1, y);
-            }
-        }
-
-        GL.End();*/
-        
-        
     }
 
     protected override void OnUnload()
     {
         base.OnUnload();
-        _tomographyShader.Dispose();
+        ShaderManager.TomographyQuadShader.Dispose();
+        ShaderManager.TomographyTextureShader.Dispose();
+        ShaderManager.UIShader.Dispose();
     }
 
-    private void DrawQuadStrips(int layer)
-    {
-        
-        GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-
-        for (int x = 0; x < _bin.XSize - 1; x++)
-        {
-            GL.Begin(PrimitiveType.QuadStrip);
-            for (int y = 0; y < _bin.YSize; y++)
-            {
-                short value;
-                value = _bin[x, y, layer];
-                GL.Color3(_transferFunction(value));
-                GL.Vertex2(x, y);
-
-                value = _bin[x + 1, y, layer];
-                GL.Color3(_transferFunction(value));
-                GL.Vertex2(x + 1, y);
-            }
-            GL.End();
-        }
-
-    }
-
-    private uint _keyCooldown = 0;
-    private uint _maxKeyCooldown = 600;
+    private int _keyCooldown = 0;
+    private int _maxKeyCooldown = 600;
     
-    private uint _TFKeyCooldown = 0;
-    private uint _maxTFKeyCooldown = 0;
+    private int _TFKeyCooldown = 0;
+    private int _maxTFKeyCooldown = 0;
     protected override void OnUpdateFrame(FrameEventArgs args)
     {
         base.OnUpdateFrame(args);
@@ -425,19 +406,16 @@ public class View : GameWindow
 
         if (keyboard.IsKeyReleased(Keys.D1))
         {
-            _maxKeyCooldown = 600;
             _mode = DrawMode.Quads;
         }
         else if (keyboard.IsKeyReleased(Keys.D2))
         {
-            _maxKeyCooldown = 0;
             _mode = DrawMode.Texture;
         }
-        else if (keyboard.IsKeyReleased(Keys.D3))
-        {
-            _maxKeyCooldown = 0;
-            _mode = DrawMode.QuadStrip;
-        }
+
+        _maxKeyCooldown = cachedFps / 8;
+        _maxTFKeyCooldown = cachedFps / 8;
+        
         lock (_fpsLock)
         {
             _fpsLock.FpsCount++;
